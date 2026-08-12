@@ -1,0 +1,16 @@
+{
+  "Name": "Language Switcher",
+  "Author": "suzyxinsu",
+  "Version": "1.0.0",
+  "Description": "Press a hotkey to instantly toggle the game's language between English and Chinese, for language-learning purposes.",
+  "UniqueID": "suzyxinsu.LanguageSwitcher",
+  "EntryDll": "LanguageSwitcher.dll",
+  "MinimumApiVersion": "4.5.0",
+  "Dependencies": [
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ],
+  "UpdateKeys": []
+}
