@@ -290,7 +290,20 @@ namespace LanguageSwitcher
                 this.lastPolledText = text;
             }
 
-            if (!string.IsNullOrWhiteSpace(text) && text != this.lastCapturedText)
+            // 只记录"确实完整显示给玩家看过"的行。仅靠文字变化不够：玩家点击推进时，
+            // exitCurrentDialogue() 会先把 currentDialogueIndex++，于是在对话框真正关闭前的
+            // 那一瞬间，getCurrentString() 已经返回下一行了——这就是之前"没说过的话出现在
+            // 历史里"的成因（George 只说了第一句，第二句要再对话一次才会说，却被提前记下）。
+            //
+            // 两个条件来自 DialogueBox 自身的状态：
+            //   transitioning              开场动画和 beginOutro() 关闭动画期间都为 true，
+            //                              上面那个瞬间正处于 outro，因此会被排除
+            //   characterIndexInDialogue   打字机进度；只有完整打完（或玩家点击跳过打字，
+            //                              游戏会把它设到末尾）才算真的显示过
+            bool fullyTyped = dialogueBox.characterIndexInDialogue >= text.Length - 1;
+            bool actuallyShown = !dialogueBox.transitioning && fullyTyped;
+
+            if (!string.IsNullOrWhiteSpace(text) && text != this.lastCapturedText && actuallyShown)
                 this.CaptureLine(dialogue, speaker: dialogue.speaker?.Name ?? "?", text);
 
             // If the NPC is now actually showing a question (not just "this Dialogue happens to
@@ -319,9 +332,7 @@ namespace LanguageSwitcher
             LocalizedContentManager.LanguageCode? translatedLanguage = null;
             if (this.TryParseLanguageCode(this.Config.PreferredLanguage, out LocalizedContentManager.LanguageCode preferred))
             {
-                translatedLanguage = language == LocalizedContentManager.LanguageCode.en
-                    ? preferred
-                    : LocalizedContentManager.LanguageCode.en;
+                translatedLanguage = this.GetCounterpartLanguage(language, preferred);
 
                 // Once the player has answered a question, the game switches to a different, more
                 // specific dialogue entry for the NPC's follow-up - but Dialogue.TranslationKey
@@ -358,9 +369,7 @@ namespace LanguageSwitcher
             LocalizedContentManager.LanguageCode? translatedLanguage = null;
             if (this.TryParseLanguageCode(this.Config.PreferredLanguage, out LocalizedContentManager.LanguageCode preferred) && !string.IsNullOrEmpty(translationKey))
             {
-                translatedLanguage = language == LocalizedContentManager.LanguageCode.en
-                    ? preferred
-                    : LocalizedContentManager.LanguageCode.en;
+                translatedLanguage = this.GetCounterpartLanguage(language, preferred);
 
                 LocalizedContentManager.LanguageCode original = LocalizedContentManager.CurrentLanguageCode;
                 try
@@ -559,22 +568,11 @@ namespace LanguageSwitcher
             }
 
             LocalizedContentManager.LanguageCode current = LocalizedContentManager.CurrentLanguageCode;
-            LocalizedContentManager.LanguageCode target;
-            if (current == preferred)
-            {
-                // Toggling away from the target language: go back to whatever language we were
-                // actually in before switching to it, not a hardcoded "en". Without this, a player
-                // whose game normally runs in e.g. Chinese and sets PreferredLanguage to Italian
-                // would get stuck alternating between English and Italian after the first switch -
-                // the toggle would never return to Chinese, since it always assumed "the other side"
-                // was English.
-                target = this.homeLanguageCode ?? LocalizedContentManager.LanguageCode.en;
-            }
-            else
-            {
+            // 切走之前先记下当前语言，这样之后切回来才知道该回到哪儿（见 GetCounterpartLanguage）。
+            if (current != preferred)
                 this.homeLanguageCode = current;
-                target = preferred;
-            }
+
+            LocalizedContentManager.LanguageCode target = this.GetCounterpartLanguage(current, preferred);
 
             // Callers are responsible for not invoking this while a dialogue-like menu is open -
             // see the deferral logic in OnUpdateTicked.
@@ -645,6 +643,27 @@ namespace LanguageSwitcher
         private bool TryParseLanguageCode(string value, out LocalizedContentManager.LanguageCode code)
         {
             return Enum.TryParse(value, ignoreCase: true, out code) && code != LocalizedContentManager.LanguageCode.mod;
+        }
+
+        /// <summary>给定当前语言，算出切换的"另一端"是哪种语言。</summary>
+        /// <remarks>
+        /// 切换是在"游戏原本的语言"和 <see cref="ModConfig.PreferredLanguage"/> 之间进行的，
+        /// 两端都可以是任意语言——英文并不特殊。所以另一端不能写死成 en：
+        /// 已经在目标语言上时，回到 <see cref="homeLanguageCode"/>（即切过来之前所处的语言）；
+        /// 否则就是目标语言本身。
+        /// <para>
+        /// 抽成一个方法是因为这个判断原先在三处各写了一遍。修 ToggleLanguage 时只改了那一处，
+        /// 捕获对话的两处仍然写死 en，导致"中文游戏 + 意大利语目标"下回放日志把译文算成了英文。
+        /// 现在只有这一个定义，不会再各自漂移。
+        /// </para>
+        /// </remarks>
+        private LocalizedContentManager.LanguageCode GetCounterpartLanguage(
+            LocalizedContentManager.LanguageCode current,
+            LocalizedContentManager.LanguageCode preferred)
+        {
+            return current == preferred
+                ? this.homeLanguageCode ?? LocalizedContentManager.LanguageCode.en
+                : preferred;
         }
 
         /// <summary>Diagnostic logging (kept at Trace, not Info) covering the state of the two font systems (SpriteText's bitmap font and Game1's regular SpriteFonts) after a language switch. Not needed for normal operation since the underlying font/day-name bugs it was written to chase down are fixed, but left in - and easy to bump back up to Info - in case a similar rendering issue turns up again later.</summary>
@@ -804,21 +823,9 @@ namespace LanguageSwitcher
                 allowedValues: LanguageConfigMenu.SupportedLanguageCodes
             );
 
-            gmcm.AddBoolOption(
-                mod: this.ModManifest,
-                getValue: () => this.Config.ShowNotifications,
-                setValue: value => this.Config.ShowNotifications = value,
-                name: () => "Show Notifications"
-            );
-
-            gmcm.AddNumberOption(
-                mod: this.ModManifest,
-                getValue: () => this.Config.NotificationDuration,
-                setValue: value => this.Config.NotificationDuration = value,
-                name: () => "Notification Duration (seconds)",
-                min: 1,
-                max: 10
-            );
+            // 这里刻意不注册 ShowNotifications 和 NotificationDuration。GMCM 和标题画面那个菜单
+            // 应该提供同一套设置，而这两项不值得为它们在自己的菜单里做控件。字段仍然保留在
+            // config.json 里并照常生效，需要的人可以直接改文件。
         }
     }
 }

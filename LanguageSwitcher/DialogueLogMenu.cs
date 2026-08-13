@@ -182,7 +182,24 @@ namespace LanguageSwitcher
             string? text = this.ShowTranslation ? entry.TranslatedText : entry.Text;
             SpriteFont font = this.fontResolver(language);
 
+            // 每条记录的译文是在捕获那一刻按当时的目标语言算好并存下来的，之后改目标语言不会
+            // 回溯重算。如果当时的目标语言恰好就等于游戏语言（比如英文游戏 + 目标设成 en），
+            // "译文"和原文就是同一种语言、同一段文字——两边看起来一模一样，很像是切换没生效。
+            // 这里明确说出来，而不是把同一段文字再画一遍。
+            bool sameAsOriginal = this.ShowTranslation
+                && entry.TranslatedLanguage.HasValue
+                && entry.TranslatedLanguage == entry.Language;
+
             y = this.DrawWrapped(b, font, $"{speaker} ({(language.HasValue ? language.Value.ToString() : "?")}):", x, y, maxWidth, Color.SaddleBrown, viewTop, viewBottom);
+
+            if (sameAsOriginal)
+            {
+                return this.DrawWrapped(
+                    b, font,
+                    $"(captured while the target language was also {entry.Language} - same as the original)",
+                    x + 24, y, maxWidth - 24, Color.Gray, viewTop, viewBottom);
+            }
+
             y = this.DrawWrapped(
                 b, font,
                 text ?? "(no translation available for this line)",

@@ -217,6 +217,11 @@ namespace LanguageSwitcher
                 return;
             }
 
+            KeybindList previous = this.capturing == CaptureTarget.HotKey
+                ? this.config.HotKey
+                : this.config.ReplayLogHotKey;
+            bool replacedMultiBinding = IsBeyondSingleKey(previous);
+
             KeybindList newBinding = KeybindList.Parse(button.ToString());
             if (this.capturing == CaptureTarget.HotKey)
                 this.config.HotKey = newBinding;
@@ -224,7 +229,12 @@ namespace LanguageSwitcher
                 this.config.ReplayLogHotKey = newBinding;
 
             this.save();
-            this.statusMessage = $"Hotkey set to '{button}'.";
+
+            // 如果刚覆盖掉的是一个多键绑定，把原值写出来。这个菜单只能产生单键，所以覆盖是
+            // 必然的；至少要让玩家看到丢掉了什么，以及去哪儿（GMCM / config.json）能改回来。
+            this.statusMessage = replacedMultiBinding
+                ? $"Hotkey set to '{button}', replacing '{previous}'. Use GMCM or config.json for multi-key bindings."
+                : $"Hotkey set to '{button}'.";
             this.capturing = CaptureTarget.None;
             Game1.playSound("drumkit6");
         }
@@ -310,8 +320,8 @@ namespace LanguageSwitcher
             y += 8;
 
             var defaults = new ModConfig();
-            y = this.DrawHotkeyRow(b, "Toggle language", this.config.HotKey.ToString(), defaults.HotKey.ToString(), x, y, contentWidth, ref this.hotKeyChangeButton, this.capturing == CaptureTarget.HotKey, viewTop, viewBottom);
-            y = this.DrawHotkeyRow(b, "Dialogue replay log", this.config.ReplayLogHotKey.ToString(), defaults.ReplayLogHotKey.ToString(), x, y, contentWidth, ref this.replayLogHotKeyChangeButton, this.capturing == CaptureTarget.ReplayLogHotKey, viewTop, viewBottom);
+            y = this.DrawHotkeyRow(b, "Toggle language", this.config.HotKey, defaults.HotKey.ToString(), x, y, contentWidth, ref this.hotKeyChangeButton, this.capturing == CaptureTarget.HotKey, viewTop, viewBottom);
+            y = this.DrawHotkeyRow(b, "Dialogue replay log", this.config.ReplayLogHotKey, defaults.ReplayLogHotKey.ToString(), x, y, contentWidth, ref this.replayLogHotKeyChangeButton, this.capturing == CaptureTarget.ReplayLogHotKey, viewTop, viewBottom);
 
             this.resetHotkeysButton = new Rectangle(x + contentWidth - HotkeyButtonWidth, y - 4, HotkeyButtonWidth, this.font.LineSpacing + 8);
             if (b != null && this.resetHotkeysButton.Y >= viewTop && this.resetHotkeysButton.Bottom <= viewBottom)
@@ -340,8 +350,23 @@ namespace LanguageSwitcher
             return y + this.scrollPixels - (this.yPositionOnScreen + TopPadding);
         }
 
-        private int DrawHotkeyRow(SpriteBatch? b, string label, string currentValue, string defaultValue, int x, int y, int contentWidth, ref Rectangle changeButton, bool isCapturing, int viewTop, int viewBottom)
+        /// <summary>判断一个绑定是否超出本菜单能表达的范围——多组绑定（<c>K, LeftShift + K</c>）或组合键。</summary>
+        /// <remarks>
+        /// 配置字段是 <see cref="KeybindList"/>，本身支持多组绑定和组合键，GMCM 和直接编辑
+        /// config.json 都能设。但本菜单捕获的是单个 <see cref="SButton"/>，写回去时只会产生一个
+        /// 单键绑定——也就是说在这里点一次 Change，就会把原本的多重绑定悄悄压成单键。
+        /// 检测到这种情况时在行尾标注出来，让覆盖是玩家知情的选择，而不是静默丢配置。
+        /// </remarks>
+        private static bool IsBeyondSingleKey(KeybindList binding)
         {
+            return binding.Keybinds.Length > 1
+                || binding.Keybinds.Any(keybind => keybind.Buttons.Length > 1);
+        }
+
+        private int DrawHotkeyRow(SpriteBatch? b, string label, KeybindList binding, string defaultValue, int x, int y, int contentWidth, ref Rectangle changeButton, bool isCapturing, int viewTop, int viewBottom)
+        {
+            string currentValue = binding.ToString();
+            bool multiBinding = IsBeyondSingleKey(binding);
             int lineHeight = this.font.LineSpacing;
             changeButton = new Rectangle(x + contentWidth - HotkeyButtonWidth, y - 4, HotkeyButtonWidth, lineHeight + 8);
 
@@ -352,10 +377,13 @@ namespace LanguageSwitcher
             if (b != null && changeButton.Bottom <= viewBottom && changeButton.Y >= viewTop)
             {
                 string text = $"{label}: {currentValue} (default: {defaultValue})";
+                if (multiBinding)
+                    text += "  - multiple keys; Change replaces them with one";
+
                 int maxTextWidth = contentWidth - HotkeyButtonWidth - 16;
                 Vector2 textSize = this.font.MeasureString(text);
                 float scale = Math.Min(1f, maxTextWidth / Math.Max(1f, textSize.X));
-                b.DrawString(this.font, text, new Vector2(x, y), Color.Black, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+                b.DrawString(this.font, text, new Vector2(x, y), multiBinding ? Color.DarkRed : Color.Black, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
 
                 drawTextureBox(b, changeButton.X, changeButton.Y, changeButton.Width, changeButton.Height, isCapturing ? Color.Wheat : Color.White);
                 string buttonLabel = isCapturing ? "Press a key..." : "Change";
