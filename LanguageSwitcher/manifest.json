@@ -1,9 +1,9 @@
 {
   "Name": "Language Switcher",
-  "Author": "suzyxinsu",
+  "Author": "vilalotteria",
   "Version": "1.0.0",
-  "Description": "Press a hotkey to instantly toggle the game's language between English and Chinese, for language-learning purposes.",
-  "UniqueID": "suzyxinsu.LanguageSwitcher",
+  "Description": "Press a hotkey to instantly switch between the game's current language and a target language of your choice, with a bilingual dialogue replay log. For learning a language through the game.",
+  "UniqueID": "vilalotteria.LanguageSwitcher",
   "EntryDll": "LanguageSwitcher.dll",
   "MinimumApiVersion": "4.5.0",
   "Dependencies": [
