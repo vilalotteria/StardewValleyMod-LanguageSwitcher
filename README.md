@@ -2,26 +2,39 @@
 
 *[中文说明](README.zh-CN.md)*
 
-A Stardew Valley SMAPI mod that instantly switches between your current game language and a target
-language of your choice, with a hotkey. Built for people learning a language through the game — flip
-to your target language to see how menus, items and dialogue are worded, then flip back to compare.
+Stardew Valley locks its language at startup — to see how something is worded in another language
+you'd normally have to quit, change the setting, and reload your save.
+
+This mod switches the language instantly, with one key, while you keep playing. It's built for people
+using the game to learn a language: flip to your target language to see how a menu, item or
+conversation is phrased, then flip straight back to check you understood it.
+
+It works between **any two** of the game's 12 languages, not just English and one other. If you play
+in Chinese and are learning Italian, that's Chinese to Italian — English never has to be involved.
 
 ## Features
 
-- **Toggle language with one key** (default `K`) — switches between the game's current language and
-  your chosen target. Menus, item names, dialogue and so on update immediately, no restart needed.
-  Both ends are freely chosen, so Chinese ↔ Italian or English ↔ Japanese work just as well.
-- **Dialogue replay log** (default `L`) — a scrollable window of recent NPC dialogue in
-  chronological order, with a key to flip each entry between its original text and a translation.
-  Because the game locks text into a language the moment it's displayed, conversations already on
-  screen can't be retranslated (see [Known limitations](#known-limitations)) — this window is how
-  you review them afterward.
-- **Title-screen setup** — a **Language Switch** button in the bottom-right of the title screen lets
-  you pick the target language, rebind both hotkeys, and reset them to defaults, with no extra mods
-  required. Rebinding rejects keys the game already uses (WASD, arrows, E, F, M, Y, Tab, number
-  keys, and so on).
-- **GMCM support** (optional) — if [Generic Mod Config Menu][gmcm] is installed, every setting is
-  also editable from its in-game Mod Options page.
+**Switch language with one key** (default `K`)
+Menus, item names, tooltips and dialogue update immediately — no restart, no reloading your save.
+Switches between whatever language you're currently playing in and your chosen target.
+
+**Dialogue replay log** (default `L`)
+A scrollable window of recent NPC dialogue, with a key to flip each line between the original and a
+translation. This exists because the game fixes text into a language the moment it's drawn, so a
+conversation already on screen can't be re-translated (see [Known limitations](#known-limitations))
+— the log is how you go back and read it afterwards. Player dialogue choices are captured too, so
+you can see the options you didn't pick.
+
+**Set up from the title screen**
+Pick your target language and rebind both hotkeys from a **Language Switch** button on the title
+screen. Keys already used by the game (WASD, arrows, E, F, M, Y, Tab, number keys…) are rejected, so
+you can't accidentally break your controls.
+
+**Generic Mod Config Menu supported** (optional)
+If you have [GMCM][gmcm], the same settings are available from its in-game Mod Options page.
+
+Languages: English, Русский, 中文, Deutsch, Português, Français, Español, 日本語, 한국어, Italiano,
+Türkçe, Magyar
 
 ## Requirements
 
@@ -45,16 +58,19 @@ to your target language to see how menus, items and dialogue are worded, then fl
 
 ### Settings
 
-Editable in `config.json` (generated on first run), in the GMCM menu, or in the title-screen
-Language Switch popup:
+| Field | Default | Description | Where to change it |
+|---|---|---|---|
+| `PreferredLanguage` | `zh` | Target language: `en`/`ru`/`zh`/`de`/`pt`/`fr`/`es`/`ja`/`ko`/`it`/`tr`/`hu` (the same set the game itself offers) | Title screen, GMCM, or `config.json` |
+| `HotKey` | `K` | Key that switches language | Title screen, GMCM, or `config.json` |
+| `ReplayLogHotKey` | `L` | Key that opens the dialogue replay log | Title screen, GMCM, or `config.json` |
+| `ShowNotifications` | `true` | Whether to show a HUD message when switching | `config.json` |
+| `NotificationDuration` | `3` | How many seconds that message stays up | `config.json` |
 
-| Field | Default | Description |
-|---|---|---|
-| `HotKey` | `K` | Key that switches language |
-| `ReplayLogHotKey` | `L` | Key that opens the dialogue replay log |
-| `PreferredLanguage` | `zh` | Target language: `en`/`ru`/`zh`/`de`/`pt`/`fr`/`es`/`ja`/`ko`/`it`/`tr`/`hu` (same set the game itself offers) |
-| `ShowNotifications` | `true` | Whether to show a HUD message when switching |
-| `NotificationDuration` | `3` | How many seconds that message stays up |
+`config.json` is generated in the mod folder on first run.
+
+The hotkey fields accept several bindings and modifier combos (`K, LeftShift + K`) when edited in
+`config.json` or GMCM. The title-screen menu captures a single key, so rebinding there replaces a
+multi-key binding with one key — it warns you before doing so.
 
 ## Known limitations
 
