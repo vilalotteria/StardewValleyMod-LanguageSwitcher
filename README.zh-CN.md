@@ -2,6 +2,8 @@
 
 *[English](README.md)*
 
+**[在 Nexus Mods 下载](https://www.nexusmods.com/stardewvalley/mods/50762)**
+
 星露谷的语言在启动时就固定了——想看看某句话换个语言怎么说，正常得退出游戏、改设置、重新读档。
 
 这个 mod 让你在游戏过程中按一个键即时切换语言。主要给用星露谷学外语的玩家用：切到目标语言看看某个菜单、物品或对话是怎么表达的，再切回来确认自己理解得对不对。
@@ -33,8 +35,10 @@
 ## 安装
 
 1. 安装 SMAPI（如果还没装）
-2. 把 `LanguageSwitcher` 文件夹整个放进 `Stardew Valley/Mods/` 目录
-3. 用 SMAPI 启动游戏
+2. 从 [Nexus Mods](https://www.nexusmods.com/stardewvalley/mods/50762) 下载本 mod
+3. 解压到 `Stardew Valley/Mods/` 目录，最终应为 `Mods/LanguageSwitcher/manifest.json`
+4. 用 SMAPI 启动游戏
+5. 在标题画面点击右下角的 **Language Switch** 按钮选择目标语言
 
 ## 使用
 

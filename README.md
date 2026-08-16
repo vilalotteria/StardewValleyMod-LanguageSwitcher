@@ -2,6 +2,8 @@
 
 *[中文说明](README.zh-CN.md)*
 
+**[Download on Nexus Mods](https://www.nexusmods.com/stardewvalley/mods/50762)**
+
 Stardew Valley locks its language at startup — to see how something is worded in another language
 you'd normally have to quit, change the setting, and reload your save.
 
@@ -46,8 +48,11 @@ Türkçe, Magyar
 ## Installation
 
 1. Install SMAPI, if you haven't already
-2. Drop the `LanguageSwitcher` folder into `Stardew Valley/Mods/`
-3. Launch the game through SMAPI
+2. Download the mod from [Nexus Mods](https://www.nexusmods.com/stardewvalley/mods/50762)
+3. Unzip it into `Stardew Valley/Mods/`, so you end up with
+   `Mods/LanguageSwitcher/manifest.json`
+4. Launch the game through SMAPI
+5. On the title screen, click **Language Switch** (bottom right) to pick your target language
 
 ## Usage
 
