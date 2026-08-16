@@ -313,8 +313,13 @@ namespace LanguageSwitcher
             // response options themselves too - the player might want to see (and translate) what
             // they could have said. These come straight from the base entry, not a player-choice-
             // driven sub-entry, so they're safe to translate the normal way.
+            //
+            // 这里同样要等 actuallyShown：isCurrentDialogueAQuestion() 在打字机还没打完时就已经
+            // 为 true，而上面记录台词那一步被 actuallyShown 挡着，结果就是选项先落库、引出选项的
+            // 那句台词几帧之后才补上——顺序反了。两处用同一个门槛，且台词的判断写在前面，顺序才
+            // 稳定。（这个回归是加 actuallyShown 修"幽灵对话"时引入的。）
             List<NPCDialogueResponse>? options = dialogue.getNPCResponseOptions();
-            if (dialogue.isCurrentDialogueAQuestion() && options is { Count: > 0 } && this.pendingResponseOptions == null)
+            if (actuallyShown && dialogue.isCurrentDialogueAQuestion() && options is { Count: > 0 } && this.pendingResponseOptions == null)
             {
                 this.pendingResponseOptions = options.Select(o => (o.responseKey, o.responseText)).ToList();
                 this.CaptureResponseOptions(dialogue, this.pendingResponseOptions);
