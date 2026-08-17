@@ -2,7 +2,7 @@
 
 *[中文说明](README.zh-CN.md)*
 
-**[Download on Nexus Mods](https://www.nexusmods.com/stardewvalley/mods/50762)**
+**[Download on Nexus Mods](https://www.nexusmods.com/stardewvalley/mods/50762)** · [Changelog](CHANGELOG.md)
 
 Stardew Valley locks its language at startup — to see how something is worded in another language
 you'd normally have to quit, change the setting, and reload your save.
@@ -70,6 +70,7 @@ Türkçe, Magyar
 | `ReplayLogHotKey` | `L` | Key that opens the dialogue replay log | Title screen, GMCM, or `config.json` |
 | `ShowNotifications` | `true` | Whether to show a HUD message when switching | `config.json` |
 | `NotificationDuration` | `3` | How many seconds that message stays up | `config.json` |
+| `VerboseLogging` | `false` | Whether to write dialogue-capture, translation-lookup and font diagnostics to the SMAPI log. Turn it on when a line isn't being captured or translated — the log is the useful thing to attach to a bug report. Errors and warnings are logged either way | `config.json` |
 
 `config.json` is generated in the mod folder on first run.
 
@@ -90,6 +91,36 @@ it's displayed, and can't change it retroactively.
 - **Translations for branching dialogue are best-effort.** For dialogue involving random branches or
   player choices, the translation depends on being able to identify which branch actually ran. When
   that can't be determined, the entry shows "no translation" rather than risk showing the wrong line.
+
+## Building from source
+
+You'll need the [.NET 6 SDK](https://dotnet.microsoft.com/download). The game ships the .NET 6
+runtime, so the target framework has to stay `net6.0` — it can't be moved to a newer version.
+
+```bash
+dotnet build LanguageSwitcher/LanguageSwitcher.csproj
+```
+
+[Mod Build Config](https://github.com/Pathoschild/SMAPI/blob/develop/docs/technical/mod-package.md)
+does two extra things for you: it deploys the build to `Stardew Valley/Mods/LanguageSwitcher/` (launch
+SMAPI and it's there), and it writes a release-ready zip to `LanguageSwitcher/bin/<config>/net6.0/`.
+
+The game holds the DLL open while it's running, so deploying fails with `being used by another
+process`. Close the game first, or build without deploying:
+
+```bash
+dotnet build LanguageSwitcher/LanguageSwitcher.csproj -p:EnableModDeploy=false
+```
+
+For a release package, build in Release — the zip lands at
+`LanguageSwitcher/bin/Release/net6.0/LanguageSwitcher <version>.zip`:
+
+```bash
+dotnet build LanguageSwitcher/LanguageSwitcher.csproj -c Release
+```
+
+When investigating a problem, set `VerboseLogging` to `true` in `config.json` to get the dialogue
+capture and translation lookups written to the SMAPI log.
 
 ## License
 
