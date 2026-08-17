@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.4
+
+- **The billboard now follows the language switch.** The Help Wanted quest and the special orders
+  board kept their original text, which turned into boxes (▯▯▯) when switching between languages
+  that don't share an alphabet — the old text drawn with the new language's font.
+- **Gift reactions can be translated in the replay log.** What an NPC says when you hand them a gift
+  comes from their gift-taste data rather than a dialogue file, so those lines previously showed "no
+  translation available".
+
 ## 1.0.3
 
 Four fixes, all in the same family: text that the game resolves once and then keeps, where nothing
