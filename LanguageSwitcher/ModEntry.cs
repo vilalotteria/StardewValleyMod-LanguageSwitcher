@@ -11,6 +11,7 @@ using StardewValley.BellsAndWhistles;
 using StardewValley.Menus;
 using StardewValley.Objects;
 using StardewValley.Quests;
+using StardewValley.SpecialOrders;
 
 namespace LanguageSwitcher
 {
@@ -557,7 +558,12 @@ namespace LanguageSwitcher
         {
             string? translationKey = dialogue.TranslationKey;
             if (string.IsNullOrEmpty(translationKey))
-                return this.TryGetEventDialogueLine(dialogue, otherLanguage);
+            {
+                // 没有 translation key 的台词各有各的来源，逐个试：文本内联在事件脚本里的剧情对话，
+                // 以及文本内联在 Data\NPCGiftTastes 里的送礼反应。
+                return this.TryGetEventDialogueLine(dialogue, otherLanguage)
+                    ?? this.TryGetGiftReactionLine(dialogue, otherLanguage);
+            }
 
             LocalizedContentManager.LanguageCode original = LocalizedContentManager.CurrentLanguageCode;
             try
@@ -675,6 +681,109 @@ namespace LanguageSwitcher
             finally
             {
                 LocalizedContentManager.CurrentLanguageCode = original;
+            }
+        }
+
+        /// <summary>Try to find the other-language text for an NPC's reaction to being given a gift, which also carries no <see cref="Dialogue.TranslationKey"/>.</summary>
+        /// <remarks>
+        /// <para>
+        /// <c>NPC.GetGiftReaction</c> builds these as <c>new Dialogue(this, null, ArgUtility.Get(rawFields, taste))</c>,
+        /// where <c>rawFields</c> is the NPC's <c>Data\NPCGiftTastes</c> entry split on <c>/</c>. So
+        /// the text lives at some field index of a localised asset, and the translation is the same
+        /// index of that asset in the other language.
+        /// </para>
+        /// <para>
+        /// We don't know the taste index (working it out again would need the gift item, which is
+        /// long gone by the time we're logging the line), so we recover it by parsing each field of
+        /// the *current*-language entry through the same constructor and seeing which one produces
+        /// the line we're actually showing. That's more robust than reimplementing the taste rules,
+        /// and it self-checks: if no field reproduces the line, we haven't understood where the text
+        /// came from and return null rather than guess.
+        /// </para>
+        /// <para>
+        /// Several fields can share the same source text - "......" is exactly the kind of reply a
+        /// character like Sebastian gives to more than one gift tier - so a match isn't necessarily
+        /// unique. That's only a problem if the candidates disagree once translated, so we compare
+        /// the other-language values and accept the match when they all say the same thing.
+        /// </para>
+        /// </remarks>
+        private string? TryGetGiftReactionLine(Dialogue dialogue, LocalizedContentManager.LanguageCode otherLanguage)
+        {
+            NPC? speaker = dialogue.speaker;
+            if (speaker == null || !Game1.NPCGiftTastes.TryGetValue(speaker.Name, out string? liveRaw))
+                return null;
+
+            string[] liveFields = liveRaw.Split('/');
+            int lineIndex = dialogue.currentDialogueIndex;
+            string? liveText = CleanDialogueText(dialogue.dialogues[lineIndex].Text);
+            if (string.IsNullOrEmpty(liveText))
+                return null;
+
+            // 哪些字段重新解析后能还原出正在显示的这一行？奇数下标存的是物品 ID 列表，
+            // 不会匹配上，所以直接全扫一遍就行。
+            List<int> candidates = new();
+            for (int i = 0; i < liveFields.Length; i++)
+            {
+                if (string.IsNullOrWhiteSpace(liveFields[i]))
+                    continue;
+
+                if (this.ParseFieldLine(speaker, liveFields[i], lineIndex, dialogue.dialogues.Count) == liveText)
+                    candidates.Add(i);
+            }
+
+            if (candidates.Count == 0)
+                return null; // 这行不是从 NPCGiftTastes 来的，或者我们理解错了它的来源
+
+            LocalizedContentManager.LanguageCode original = LocalizedContentManager.CurrentLanguageCode;
+            try
+            {
+                LocalizedContentManager.CurrentLanguageCode = otherLanguage;
+
+                var otherTastes = this.Helper.GameContent.Load<Dictionary<string, string>>("Data\\NPCGiftTastes");
+                if (!otherTastes.TryGetValue(speaker.Name, out string? otherRaw))
+                    return null;
+
+                string[] otherFields = otherRaw.Split('/');
+                if (otherFields.Length != liveFields.Length)
+                    return null;
+
+                List<string> translations = candidates
+                    .Select(i => this.ParseFieldLine(speaker, otherFields[i], lineIndex, dialogue.dialogues.Count))
+                    .Where(text => !string.IsNullOrEmpty(text))
+                    .Distinct()
+                    .ToList()!;
+
+                this.LogDiagnostic(
+                    $"[DialogueDiag] gift reaction for {speaker.Name}: matched field(s) [{string.Join(", ", candidates)}], {translations.Count} distinct {otherLanguage} value(s)");
+
+                // 多个字段共用同一句原文时，只有它们的译文也一致才敢用
+                return translations.Count == 1 ? translations[0] : null;
+            }
+            catch (Exception ex)
+            {
+                this.Monitor.Log($"Couldn't parse the {otherLanguage} gift reactions for '{speaker.Name}': {ex.Message}", LogLevel.Trace);
+                return null;
+            }
+            finally
+            {
+                LocalizedContentManager.CurrentLanguageCode = original;
+            }
+        }
+
+        /// <summary>Parse one raw <c>Data\NPCGiftTastes</c> field through the same <see cref="Dialogue"/> constructor the game uses for it, and return the line at <paramref name="lineIndex"/> in the same cleaned-up form we display. Returns null if the field doesn't parse to a comparable shape.</summary>
+        private string? ParseFieldLine(NPC speaker, string rawField, int lineIndex, int expectedLineCount)
+        {
+            try
+            {
+                var parsed = new Dialogue(speaker, null, rawField);
+                if (parsed.dialogues.Count != expectedLineCount || lineIndex >= parsed.dialogues.Count)
+                    return null;
+
+                return CleanDialogueText(parsed.dialogues[lineIndex].Text);
+            }
+            catch
+            {
+                return null; // 物品 ID 列表之类的字段本来就不是对话，解析失败很正常
             }
         }
 
@@ -946,9 +1055,29 @@ namespace LanguageSwitcher
         /// description entirely rather than reloading it.
         /// </para>
         /// </remarks>
+        /// <summary>Drop the cached title/description text on every quest the player can currently be looking at, so it gets rebuilt in the new language.</summary>
+        /// <remarks>
+        /// <para>
+        /// Quests hold their resolved text on the instance behind a "have I loaded this yet" flag.
+        /// Clearing the flag is enough: the next read re-runs the subclass's <c>reloadDescription</c>
+        /// against the current language. (Calling that method directly doesn't work - it's empty on
+        /// the <see cref="Quest"/> base class, so doing so blanked the descriptions instead.)
+        /// </para>
+        /// <para>
+        /// The three places to look are easy to get wrong, because two of them aren't the quest log:
+        /// the Help Wanted quest on the billboard is <see cref="Game1.questOfTheDay"/> and isn't in
+        /// the log until it's accepted, and the special orders board reads from the team's own
+        /// lists. Missing the billboard is what showed up as boxes (▯▯▯) - stale Chinese text drawn
+        /// with the freshly-loaded Latin font.
+        /// </para>
+        /// </remarks>
         private void ReloadQuestText()
         {
-            foreach (Quest quest in Game1.player.questLog)
+            IEnumerable<Quest> quests = Game1.player.questLog;
+            if (Game1.questOfTheDay != null)
+                quests = quests.Append(Game1.questOfTheDay); // 公告板上的"招聘"任务，接受之前不在任务日志里
+
+            foreach (Quest quest in quests)
             {
                 if (quest == null)
                     continue;
@@ -963,6 +1092,25 @@ namespace LanguageSwitcher
                 catch (Exception ex)
                 {
                     this.Monitor.Log($"Couldn't reset cached text on quest '{quest.id.Value}': {ex.Message}", LogLevel.Trace);
+                }
+            }
+
+            // 特殊订单是另一个类，缓存字段也不同名：为 null 时才重建，所以置空即可。
+            // 它和"招聘"任务同属公告板的两个页签，问题完全一样。
+            FarmerTeam team = Game1.player.team;
+            foreach (SpecialOrder order in team.specialOrders.Concat(team.availableSpecialOrders))
+            {
+                if (order == null)
+                    continue;
+
+                try
+                {
+                    this.Helper.Reflection.GetField<string?>(order, "_localizedName", required: false)?.SetValue(null);
+                    this.Helper.Reflection.GetField<string?>(order, "_localizedDescription", required: false)?.SetValue(null);
+                }
+                catch (Exception ex)
+                {
+                    this.Monitor.Log($"Couldn't reset cached text on special order '{order.questKey.Value}': {ex.Message}", LogLevel.Trace);
                 }
             }
         }
