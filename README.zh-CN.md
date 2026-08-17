@@ -2,7 +2,7 @@
 
 *[English](README.md)*
 
-**[在 Nexus Mods 下载](https://www.nexusmods.com/stardewvalley/mods/50762)**
+**[在 Nexus Mods 下载](https://www.nexusmods.com/stardewvalley/mods/50762)** · [更新日志](CHANGELOG.md)
 
 星露谷的语言在启动时就固定了——想看看某句话换个语言怎么说，正常得退出游戏、改设置、重新读档。
 
@@ -55,6 +55,7 @@
 | `ReplayLogHotKey` | `L` | 打开对话回放日志的快捷键 | 标题画面、GMCM 或 `config.json` |
 | `ShowNotifications` | `true` | 切换语言时是否显示 HUD 提示 | 仅 `config.json` |
 | `NotificationDuration` | `3` | 提示显示几秒 | 仅 `config.json` |
+| `VerboseLogging` | `false` | 是否把对话捕获、翻译查找和字体的诊断信息写进 SMAPI 日志。排查"某句话没被记录/没有译文"时打开，报问题时附上日志会很有帮助；错误和警告不受此开关影响，始终会记录 | 仅 `config.json` |
 
 `config.json` 在首次运行后自动生成于 mod 文件夹内。
 
@@ -67,6 +68,30 @@
 - **切换会等待当前界面结束**：如果按下切换键时有菜单打开（NPC 对话、电视、信件、地图、背包等）或屏幕上有通知提示，切换会自动推迟到它们关闭之后再执行。这样可以保证界面文字始终完整可读，代价是切换有短暂延迟
 - **已显示的对话保持原语言**：正在进行或已经看过的对话不会追溯翻译。想查看双语对照，请使用对话回放日志（`L`）
 - **分支对话的翻译为尽力而为**：涉及随机分支或玩家选择分支的对话，翻译依赖于能否还原实际触发的那个分支；无法确定时会显示"无翻译"，而不是给出可能错误的内容
+
+## 从源码构建
+
+需要 [.NET 6 SDK](https://dotnet.microsoft.com/download)。游戏自带的是 .NET 6 运行时，所以目标框架必须是 `net6.0`，不能升到更新的版本。
+
+```bash
+dotnet build LanguageSwitcher/LanguageSwitcher.csproj
+```
+
+[Mod Build Config](https://github.com/Pathoschild/SMAPI/blob/develop/docs/technical/mod-package.md) 会顺带做两件事：把编译结果部署到 `Stardew Valley/Mods/LanguageSwitcher/`（启动 SMAPI 就能直接测），并在 `LanguageSwitcher/bin/<配置>/net6.0/` 下生成可发布的 zip。
+
+游戏运行时会占用 DLL，此时部署会失败并报 `being used by another process`。关掉游戏再编译，或者只编译不部署：
+
+```bash
+dotnet build LanguageSwitcher/LanguageSwitcher.csproj -p:EnableModDeploy=false
+```
+
+打发布包用 Release 配置，产物是 `LanguageSwitcher/bin/Release/net6.0/LanguageSwitcher <版本号>.zip`：
+
+```bash
+dotnet build LanguageSwitcher/LanguageSwitcher.csproj -c Release
+```
+
+排查问题时把 `config.json` 里的 `VerboseLogging` 设为 `true`，对话捕获和翻译查找的过程就会写进 SMAPI 日志。
 
 ## 许可证
 

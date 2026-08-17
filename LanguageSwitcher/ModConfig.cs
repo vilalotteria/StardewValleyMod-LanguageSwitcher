@@ -19,5 +19,9 @@ namespace LanguageSwitcher
 
         /// <summary>The key or key combination that opens the bilingual dialogue replay log.</summary>
         public KeybindList ReplayLogHotKey { get; set; } = KeybindList.Parse("L");
+
+        /// <summary>Whether to write the dialogue-capture, translation-lookup and font diagnostics to the SMAPI log.</summary>
+        /// <remarks>Off by default: these fire several times per conversation, which drowns out the rest of the log during normal play. Turn it on when investigating why a particular line wasn't captured or translated - that's the output the fixes for those bugs were diagnosed from. Errors and warnings are always logged regardless of this setting.</remarks>
+        public bool VerboseLogging { get; set; } = false;
     }
 }

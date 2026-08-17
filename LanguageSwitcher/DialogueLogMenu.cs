@@ -32,8 +32,24 @@ namespace LanguageSwitcher
 
         private int scrollPixels;
 
+        private bool showTranslation;
+
         /// <summary>Whether to show each entry's translated text instead of the original. Toggled by ModEntry when the player presses the language hotkey while this menu is open - this only changes what's displayed here, it doesn't touch the player's actual current language.</summary>
-        public bool ShowTranslation { get; set; }
+        /// <remarks>Switching between original and translated text changes how much vertical space the entries take up (different languages wrap differently, and untranslatable entries collapse to a short placeholder), so the scroll offset has to be re-evaluated against the new content height. Without that, toggling from a bottom-pinned view either left a gap below the last line or scrolled it out of sight.</remarks>
+        public bool ShowTranslation
+        {
+            get => this.showTranslation;
+            set
+            {
+                if (this.showTranslation == value)
+                    return;
+
+                bool wasAtBottom = this.scrollPixels >= this.GetMaxScroll();
+                this.showTranslation = value;
+                int maxScroll = this.GetMaxScroll();
+                this.scrollPixels = wasAtBottom ? maxScroll : Math.Clamp(this.scrollPixels, 0, maxScroll);
+            }
+        }
 
         private const int MenuWidth = 900;
         private const int MenuHeight = 640;
@@ -53,9 +69,15 @@ namespace LanguageSwitcher
 
             // Start scrolled to the bottom (the most recent conversation), matching how a chat log
             // is usually read - scroll up from there to see older history.
+            this.scrollPixels = this.GetMaxScroll();
+        }
+
+        /// <summary>The largest valid <see cref="scrollPixels"/> value, i.e. the offset at which the last line sits at the bottom of the view. Zero when everything fits without scrolling.</summary>
+        private int GetMaxScroll()
+        {
             int viewHeight = this.height - TopPadding - BottomPadding - FooterHeight;
             int contentHeight = this.MeasureContentHeight(this.width - SidePadding * 2 - ScrollbarReservedWidth);
-            this.scrollPixels = Math.Max(0, contentHeight - viewHeight);
+            return Math.Max(0, contentHeight - viewHeight);
         }
 
         /// <summary>Re-centre the menu when the window is resized (e.g. toggling fullscreen). The base implementation scales the old position proportionally, which doesn't preserve centring - it left the menu hanging off the corner of the screen after switching back from fullscreen.</summary>
@@ -72,9 +94,7 @@ namespace LanguageSwitcher
 
         public override void receiveScrollWheelAction(int direction)
         {
-            int viewHeight = this.height - TopPadding - BottomPadding - FooterHeight;
-            int contentHeight = this.MeasureContentHeight(this.width - SidePadding * 2 - ScrollbarReservedWidth);
-            int maxScroll = Math.Max(0, contentHeight - viewHeight);
+            int maxScroll = this.GetMaxScroll();
             this.scrollPixels = Math.Clamp(this.scrollPixels - Math.Sign(direction) * ScrollSpeedPixels, 0, maxScroll);
         }
 

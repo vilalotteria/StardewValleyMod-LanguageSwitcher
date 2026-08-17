@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
@@ -8,6 +9,7 @@ using StardewModdingAPI.Events;
 using StardewValley;
 using StardewValley.BellsAndWhistles;
 using StardewValley.Menus;
+using StardewValley.Objects;
 using StardewValley.Quests;
 
 namespace LanguageSwitcher
@@ -270,9 +272,8 @@ namespace LanguageSwitcher
             // actually shown to the player, which previously got captured as a phantom line.
             if (!ReferenceEquals(dialogue, this.lastCapturedDialogue))
             {
-                this.Monitor.Log(
-                    $"[DialogueDiag] New Dialogue object: hash={dialogue.GetHashCode()}, key={dialogue.TranslationKey ?? "(none)"}, speaker={dialogue.speaker?.Name ?? "?"}, dialogues.Count={dialogue.dialogues.Count}",
-                    LogLevel.Trace);
+                this.LogDiagnostic(
+                    $"[DialogueDiag] New Dialogue object: hash={dialogue.GetHashCode()}, key={dialogue.TranslationKey ?? "(none)"}, speaker={dialogue.speaker?.Name ?? "?"}, dialogues.Count={dialogue.dialogues.Count}");
                 this.lastCapturedDialogue = dialogue;
                 this.lastCapturedText = null;
                 this.lastPolledText = null;
@@ -284,9 +285,8 @@ namespace LanguageSwitcher
             string text = dialogueBox.getCurrentString();
             if (text != this.lastPolledText)
             {
-                this.Monitor.Log(
-                    $"[DialogueDiag] raw text changed: index={dialogue.currentDialogueIndex}/{dialogue.dialogues.Count}, CurrentLanguageCode={LocalizedContentManager.CurrentLanguageCode}, text='{text}'",
-                    LogLevel.Trace);
+                this.LogDiagnostic(
+                    $"[DialogueDiag] raw text changed: index={dialogue.currentDialogueIndex}/{dialogue.dialogues.Count}, CurrentLanguageCode={LocalizedContentManager.CurrentLanguageCode}, text='{text}'");
                 this.lastPolledText = text;
             }
 
@@ -358,12 +358,11 @@ namespace LanguageSwitcher
             // Trace，不是 Info：这几行是回放日志窗口做出来之前的 MVP 产物，那时只能靠控制台看
             // 结果。现在窗口就是给玩家看的地方，再往控制台刷一份纯属噪音——而且 SMAPI 日志在用户
             // 报问题时会被上传分享，没有理由把整段对话记录写进去。留着是因为排查捕获逻辑时还用得上。
-            this.Monitor.Log($"[DialogueLog] {speaker} ({language}): {text}", LogLevel.Trace);
-            this.Monitor.Log(
+            this.LogDiagnostic($"[DialogueLog] {speaker} ({language}): {text}");
+            this.LogDiagnostic(
                 translatedText != null
                     ? $"[DialogueLog]   -> {translatedLanguage}: {translatedText}"
-                    : $"[DialogueLog]   -> {translatedLanguage}: <no translation available for this line>",
-                LogLevel.Trace);
+                    : $"[DialogueLog]   -> {translatedLanguage}: <no translation available for this line>");
         }
 
         /// <summary>Log the response options offered by a question dialogue as their own entries, so the player can review (and see a translation of) choices they didn't pick. Translated by re-parsing the base entry in the other language and matching by position - safe here because these options aren't player-choice-dependent, unlike the NPC's follow-up once one is picked (see <see cref="TryGetPostChoiceTranslation"/>).</summary>
@@ -386,7 +385,7 @@ namespace LanguageSwitcher
                     var parsed = new Dialogue(dialogue.speaker, translationKey);
                     List<NPCDialogueResponse>? parsedOptions = parsed.getNPCResponseOptions();
                     if (parsedOptions != null && parsedOptions.Count == options.Count)
-                        translatedTexts = parsedOptions.Select(o => o.responseText).ToList();
+                        translatedTexts = parsedOptions.Select(o => parsed.ReplacePlayerEnteredStrings(o.responseText)).ToList();
                 }
                 catch (Exception ex)
                 {
@@ -408,7 +407,7 @@ namespace LanguageSwitcher
                 if (this.DialogueLog.Count > MaxDialogueLogEntries)
                     this.DialogueLog.RemoveAt(0);
 
-                this.Monitor.Log($"[DialogueLog] {speaker} (option {i + 1}): {optionText}", LogLevel.Trace);
+                this.LogDiagnostic($"[DialogueLog] {speaker} (option {i + 1}): {optionText}");
             }
         }
 
@@ -455,7 +454,7 @@ namespace LanguageSwitcher
                         if (candidate.dialogues.Count > 0 && candidate.dialogues[0].Text == firstPostChoiceLine)
                         {
                             this.resolvedPostChoiceKey = key;
-                            this.Monitor.Log($"[DialogueDiag] resolved post-choice key: {loadedDialogueKey}:{key}", LogLevel.Trace);
+                            this.LogDiagnostic($"[DialogueDiag] resolved post-choice key: {loadedDialogueKey}:{key}");
                             break;
                         }
                     }
@@ -478,7 +477,7 @@ namespace LanguageSwitcher
 
                     int relativeIndex = Math.Max(0, dialogue.currentDialogueIndex - this.originalDialogueLineCount);
                     int index = Math.Min(relativeIndex, parsed.dialogues.Count - 1);
-                    return parsed.dialogues[index].Text;
+                    return parsed.ReplacePlayerEnteredStrings(parsed.dialogues[index].Text);
                 }
                 finally
                 {
@@ -492,14 +491,40 @@ namespace LanguageSwitcher
             }
         }
 
-        /// <summary>Strip leftover emotion-code tokens (<c>$h</c>/<c>$s</c>/<c>$u</c>/<c>$l</c>/<c>$a</c>) from captured text. The game normally strips these itself (see <c>Dialogue.checkEmotions</c>) when a line becomes the *current* one, but our capture sources - <c>DialogueBox.getCurrentString</c> for multi-page lines, and our own re-parsed <c>Dialogue</c> instances for translations - don't always go through that step, so a token can leak into what we display. This only touches our own copy of the text for the replay log; it doesn't modify the live Dialogue object, so it can't affect anything else the game does with it.</summary>
+        /// <summary>Matches a numeric portrait index token (<c>$9</c>, <c>$12</c>, ...). See <see cref="CleanDialogueText"/>.</summary>
+        private static readonly Regex PortraitIndexToken = new(@"\$\d+", RegexOptions.Compiled);
+
+        /// <summary>Strip the control tokens that shouldn't be shown to the player.</summary>
+        /// <remarks>
+        /// <para>
+        /// This mirrors exactly what <c>Dialogue.checkForSpecialDialogueAttributes</c> (and the
+        /// <c>Dialogue.checkEmotions</c> it calls) strips: the page-continuation marker <c>{</c>, the
+        /// <c>%noturn</c> flag, the named emotion codes, and the numeric portrait-index form
+        /// (<c>$9</c>, <c>$12</c>, ...).
+        /// </para>
+        /// <para>
+        /// The game does that stripping only for the line that is *currently* being shown - every
+        /// other entry in <c>Dialogue.dialogues</c> keeps its raw token. Our capture sources read
+        /// those other entries directly (<c>DialogueBox.getCurrentString</c> for multi-page lines,
+        /// and the re-parsed <c>Dialogue</c> instances we build for translations), so tokens leak
+        /// into what we display - which is why each of these was found one at a time from a
+        /// screenshot. If another stray symbol shows up in the log, this is the list to compare
+        /// against that method.
+        /// </para>
+        /// <para>
+        /// This only touches our own copy of the text for the replay log; it doesn't modify the live
+        /// Dialogue object, so it can't affect anything else the game does with it.
+        /// </para>
+        /// </remarks>
         private static string? CleanDialogueText(string? text)
         {
             if (text == null)
                 return null;
 
-            foreach (string token in new[] { "$h", "$s", "$u", "$l", "$a" })
+            foreach (string token in new[] { "{", "%noturn", "$h", "$s", "$u", "$l", "$a" })
                 text = text.Replace(token, "");
+
+            text = PortraitIndexToken.Replace(text, "");
 
             return text.Trim();
         }
@@ -532,16 +557,15 @@ namespace LanguageSwitcher
         {
             string? translationKey = dialogue.TranslationKey;
             if (string.IsNullOrEmpty(translationKey))
-                return null;
+                return this.TryGetEventDialogueLine(dialogue, otherLanguage);
 
             LocalizedContentManager.LanguageCode original = LocalizedContentManager.CurrentLanguageCode;
             try
             {
                 LocalizedContentManager.CurrentLanguageCode = otherLanguage;
                 var parsed = new Dialogue(dialogue.speaker, translationKey);
-                this.Monitor.Log(
-                    $"[DialogueDiag] reparsed '{translationKey}' in {otherLanguage}: dialogues.Count={parsed.dialogues.Count} (live count was {dialogue.dialogues.Count})",
-                    LogLevel.Trace);
+                this.LogDiagnostic(
+                    $"[DialogueDiag] reparsed '{translationKey}' in {otherLanguage}: dialogues.Count={parsed.dialogues.Count} (live count was {dialogue.dialogues.Count})");
 
                 if (parsed.dialogues.Count == 0)
                     return null;
@@ -549,11 +573,103 @@ namespace LanguageSwitcher
                     return null; // likely diverged at a $r/$q branch - see remarks above
 
                 int index = Math.Min(dialogue.currentDialogueIndex, parsed.dialogues.Count - 1);
-                return parsed.dialogues[index].Text;
+
+                // 游戏只在某一行成为"当前行"时才替换 @（玩家名）和 %spouse/%farm 等占位符，
+                // 我们取的是别的下标，所以得自己走一遍它的替换逻辑
+                return parsed.ReplacePlayerEnteredStrings(parsed.dialogues[index].Text);
             }
             catch (Exception ex)
             {
                 this.Monitor.Log($"Couldn't parse the {otherLanguage} version of translation key '{translationKey}': {ex.Message}", LogLevel.Trace);
+                return null;
+            }
+            finally
+            {
+                LocalizedContentManager.CurrentLanguageCode = original;
+            }
+        }
+
+        /// <summary>Try to find the other-language text for a line spoken during an event (a cutscene), which <see cref="TryGetOtherLanguageDialogueLine"/> can't handle.</summary>
+        /// <remarks>
+        /// <para>
+        /// Event dialogue carries no <see cref="Dialogue.TranslationKey"/>: <c>Event.DefaultCommands.Speak</c>
+        /// builds it as <c>new Dialogue(npc, null, text)</c> with the text taken straight out of the
+        /// running event script. The script itself is the localised asset, so the way back to the
+        /// other language is to reload the event's own data file and read the same command out of it.
+        /// </para>
+        /// <para>
+        /// Lining the two scripts up is the delicate part, because a script can fork mid-event
+        /// (<c>Event.ReplaceCurrentCommand</c> and the branch commands rewrite <c>eventCommands</c>
+        /// in place), which would silently shift the indices apart. Three checks have to pass before
+        /// we'll believe the match: the two scripts parse to the same number of commands, the command
+        /// at the current index is a <c>speak</c> on both sides, and it's the same actor speaking.
+        /// If any of them fails we return null and the log shows "no translation" - the same
+        /// deliberate choice as the <c>$r</c> branch guard above, since a confidently-wrong line is
+        /// worse than none in a tool people are using to learn.
+        /// </para>
+        /// </remarks>
+        private string? TryGetEventDialogueLine(Dialogue dialogue, LocalizedContentManager.LanguageCode otherLanguage)
+        {
+            Event? currentEvent = Game1.CurrentEvent;
+            if (currentEvent?.eventCommands == null || string.IsNullOrEmpty(currentEvent.fromAssetName))
+                return null; // 生成式事件（婚礼等）没有源脚本可查
+
+            string[] liveCommands = currentEvent.eventCommands;
+            // 和游戏自己执行命令时一样夹取下标：Speak 在对话框还开着时会直接 return，
+            // 不推进 CurrentCommand，所以这里指的就是当前这句台词
+            int commandIndex = Math.Min(liveCommands.Length - 1, currentEvent.CurrentCommand);
+            if (commandIndex < 0)
+                return null;
+
+            string[] liveArgs = ArgUtility.SplitBySpaceQuoteAware(liveCommands[commandIndex]);
+            if (ArgUtility.Get(liveArgs, 0) != "speak")
+                return null;
+
+            string? actorName = ArgUtility.Get(liveArgs, 1);
+            if (string.IsNullOrEmpty(actorName))
+                return null;
+
+            LocalizedContentManager.LanguageCode original = LocalizedContentManager.CurrentLanguageCode;
+            try
+            {
+                LocalizedContentManager.CurrentLanguageCode = otherLanguage;
+
+                Dictionary<string, string> otherEvents = this.Helper.GameContent.Load<Dictionary<string, string>>(currentEvent.fromAssetName);
+
+                // 条目的 key 形如 "35/f Willy 0/t 600 1400"，第一段就是事件 id
+                string? otherScript = otherEvents
+                    .FirstOrDefault(pair => pair.Key.Split('/')[0] == currentEvent.id)
+                    .Value;
+                if (string.IsNullOrEmpty(otherScript))
+                    return null;
+
+                string[] otherCommands = Event.ParseCommands(otherScript);
+                if (otherCommands.Length != liveCommands.Length)
+                    return null; // 脚本中途分叉过，下标已经对不上了
+
+                string[] otherArgs = ArgUtility.SplitBySpaceQuoteAware(otherCommands[commandIndex]);
+                if (ArgUtility.Get(otherArgs, 0) != "speak" || ArgUtility.Get(otherArgs, 1) != actorName)
+                    return null;
+
+                string? otherText = ArgUtility.Get(otherArgs, 2);
+                if (string.IsNullOrEmpty(otherText))
+                    return null;
+
+                // 一条 speak 里可能用 #$b# 分成好几页，游戏会把它们拆进 dialogues。
+                // 交给 Dialogue 自己拆，再取和实况相同的那一页。
+                var parsed = new Dialogue(dialogue.speaker, null, otherText);
+                this.LogDiagnostic(
+                    $"[DialogueDiag] reparsed event '{currentEvent.fromAssetName}' id={currentEvent.id} cmd={commandIndex} in {otherLanguage}: dialogues.Count={parsed.dialogues.Count} (live count was {dialogue.dialogues.Count})");
+
+                if (parsed.dialogues.Count == 0 || parsed.dialogues.Count != dialogue.dialogues.Count)
+                    return null;
+
+                int index = Math.Min(dialogue.currentDialogueIndex, parsed.dialogues.Count - 1);
+                return parsed.ReplacePlayerEnteredStrings(parsed.dialogues[index].Text);
+            }
+            catch (Exception ex)
+            {
+                this.Monitor.Log($"Couldn't parse the {otherLanguage} version of event '{currentEvent.fromAssetName}' (id {currentEvent.id}): {ex.Message}", LogLevel.Trace);
                 return null;
             }
             finally
@@ -630,7 +746,7 @@ namespace LanguageSwitcher
 
             this.LogFontDiagnostics(target);
             this.RefreshDayTimeMoneyBox();
-            this.ClearCachedItemDescriptions();
+            this.ClearCachedItemText();
             this.ReloadQuestText();
 
             // Trace 而非 Debug：Debug 会打到控制台，而玩家每按一次快捷键就切一次，界面上本来就有
@@ -677,9 +793,20 @@ namespace LanguageSwitcher
                 : preferred;
         }
 
-        /// <summary>Diagnostic logging (kept at Trace, not Info) covering the state of the two font systems (SpriteText's bitmap font and Game1's regular SpriteFonts) after a language switch. Not needed for normal operation since the underlying font/day-name bugs it was written to chase down are fixed, but left in - and easy to bump back up to Info - in case a similar rendering issue turns up again later.</summary>
+        /// <summary>Write one line of diagnostic output, unless <see cref="ModConfig.VerboseLogging"/> is off.</summary>
+        /// <remarks>The dialogue and font diagnostics behind this are what every text-caching bug in this mod so far was actually diagnosed from, so they're worth keeping - but they fire several times per conversation, which buries everything else in the log during normal play. Gating them keeps both properties. Failures still log unconditionally; only this running commentary is optional.</remarks>
+        private void LogDiagnostic(string message)
+        {
+            if (this.Config.VerboseLogging)
+                this.Monitor.Log(message, LogLevel.Trace);
+        }
+
+        /// <summary>Diagnostic logging covering the state of the two font systems (SpriteText's bitmap font and Game1's regular SpriteFonts) after a language switch. Not needed for normal operation since the underlying font/day-name bugs it was written to chase down are fixed, but left in - behind <see cref="ModConfig.VerboseLogging"/> - in case a similar rendering issue turns up again later.</summary>
         private void LogFontDiagnostics(LocalizedContentManager.LanguageCode target)
         {
+            if (!this.Config.VerboseLogging)
+                return;
+
             const char probeChar = '星'; // from "星期三" (Wednesday), which was seen rendering wrong
 
             this.Monitor.Log(
@@ -737,21 +864,65 @@ namespace LanguageSwitcher
         /// translated name above a stale description.
         /// </para>
         /// </remarks>
-        private void ClearCachedItemDescriptions()
+        /// <summary>Drop the per-item name/description text that some item classes cache on the instance itself, so it gets re-read in the new language the next time it's shown.</summary>
+        /// <remarks>
+        /// <para>
+        /// Most items (<see cref="Object"/>, furniture, wallpaper) resolve their text from
+        /// <c>ItemRegistry</c> on every access, so the content-cache invalidation in
+        /// <c>ToggleLanguage</c> already covers them. The classes handled here don't: they resolve
+        /// once and keep the result on the instance, where nothing invalidates it.
+        /// </para>
+        /// <para>
+        /// Each one needs a different nudge, because each caches differently - see the comments
+        /// inline. Getting this wrong is easy to miss, since a stale item only shows up when you
+        /// happen to hover that particular kind of item after switching.
+        /// </para>
+        /// </remarks>
+        private void ClearCachedItemText()
         {
             try
             {
-                // Covers player inventories, chests, items on tables, etc.
+                // 覆盖玩家背包、身上穿戴的装备、箱子、桌上的物品等
+                // （ForEachItemHelper.ForEachItemInWorld 确实会遍历 shirtItem/pantsItem/boots/hat/rings）
                 Utility.ForEachItem(item =>
                 {
-                    if (item is Tool tool)
-                        tool.description = null!;
+                    switch (item)
+                    {
+                        // Tool.DisplayName 每次读取都重新解析，只有描述缓存在 _description 里
+                        case Tool tool:
+                            tool.description = null!;
+                            break;
+
+                        // 这三类把名字和描述一起缓存成字段，只有字段为 null 时才会调
+                        // loadDisplayFields() 重新读取
+                        case Boots boots:
+                            boots.displayName = null!;
+                            boots.description = null!;
+                            break;
+                        case Hat hat:
+                            hat.displayName = null!;
+                            hat.description = null!;
+                            break;
+                        case Ring ring:
+                            ring.displayName = null!;
+                            ring.description = null!;
+                            break;
+
+                        // 衣服用 _loadedData 这个布尔量把关，字段本身不为 null，所以置空没用。
+                        // 但也不能直接调 LoadData(forceReload: true)：那条路径会把 clothesColor
+                        // 重置成白色，玩家染过的衣服会掉色。把标志位翻回 false，下次读 DisplayName
+                        // 时游戏自己会走懒加载那条路——懒加载不带 forceReload，不碰颜色。
+                        case Clothing clothing:
+                            this.Helper.Reflection.GetField<bool>(clothing, "_loadedData").SetValue(false);
+                            break;
+                    }
+
                     return true;
                 });
             }
             catch (Exception ex)
             {
-                this.Monitor.Log($"Couldn't clear cached item descriptions: {ex.Message}", LogLevel.Trace);
+                this.Monitor.Log($"Couldn't clear cached item text: {ex.Message}", LogLevel.Trace);
             }
         }
 
