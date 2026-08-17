@@ -355,12 +355,15 @@ namespace LanguageSwitcher
             if (this.DialogueLog.Count > MaxDialogueLogEntries)
                 this.DialogueLog.RemoveAt(0);
 
-            this.Monitor.Log($"[DialogueLog] {speaker} ({language}): {text}", LogLevel.Info);
+            // Trace，不是 Info：这几行是回放日志窗口做出来之前的 MVP 产物，那时只能靠控制台看
+            // 结果。现在窗口就是给玩家看的地方，再往控制台刷一份纯属噪音——而且 SMAPI 日志在用户
+            // 报问题时会被上传分享，没有理由把整段对话记录写进去。留着是因为排查捕获逻辑时还用得上。
+            this.Monitor.Log($"[DialogueLog] {speaker} ({language}): {text}", LogLevel.Trace);
             this.Monitor.Log(
                 translatedText != null
                     ? $"[DialogueLog]   -> {translatedLanguage}: {translatedText}"
                     : $"[DialogueLog]   -> {translatedLanguage}: <no translation available for this line>",
-                LogLevel.Info);
+                LogLevel.Trace);
         }
 
         /// <summary>Log the response options offered by a question dialogue as their own entries, so the player can review (and see a translation of) choices they didn't pick. Translated by re-parsing the base entry in the other language and matching by position - safe here because these options aren't player-choice-dependent, unlike the NPC's follow-up once one is picked (see <see cref="TryGetPostChoiceTranslation"/>).</summary>
@@ -405,7 +408,7 @@ namespace LanguageSwitcher
                 if (this.DialogueLog.Count > MaxDialogueLogEntries)
                     this.DialogueLog.RemoveAt(0);
 
-                this.Monitor.Log($"[DialogueLog] {speaker} (option {i + 1}): {optionText}", LogLevel.Info);
+                this.Monitor.Log($"[DialogueLog] {speaker} (option {i + 1}): {optionText}", LogLevel.Trace);
             }
         }
 
@@ -630,7 +633,10 @@ namespace LanguageSwitcher
             this.ClearCachedItemDescriptions();
             this.ReloadQuestText();
 
-            this.Monitor.Log($"Switched language to '{target}'.", LogLevel.Debug);
+            // Trace 而非 Debug：Debug 会打到控制台，而玩家每按一次快捷键就切一次，界面上本来就有
+            // HUD 提示确认，控制台再来一行是多余的。Trace 仍然会写进 SMAPI 日志文件——用户报问题时
+            // 分享的正是那个文件，所以"切换到底有没有执行"这个诊断价值一点没丢。
+            this.Monitor.Log($"Switched language to '{target}'.", LogLevel.Trace);
 
             if (this.Config.ShowNotifications)
             {
