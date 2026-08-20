@@ -12,6 +12,7 @@ using StardewValley.Menus;
 using StardewValley.Objects;
 using StardewValley.Quests;
 using StardewValley.SpecialOrders;
+using StardewValley.TokenizableStrings;
 
 namespace LanguageSwitcher
 {
@@ -498,10 +499,12 @@ namespace LanguageSwitcher
         /// <summary>Strip the control tokens that shouldn't be shown to the player.</summary>
         /// <remarks>
         /// <para>
-        /// This mirrors exactly what <c>Dialogue.checkForSpecialDialogueAttributes</c> (and the
+        /// This mirrors what <c>Dialogue.checkForSpecialDialogueAttributes</c> (and the
         /// <c>Dialogue.checkEmotions</c> it calls) strips: the page-continuation marker <c>{</c>, the
         /// <c>%noturn</c> flag, the named emotion codes, and the numeric portrait-index form
-        /// (<c>$9</c>, <c>$12</c>, ...).
+        /// (<c>$9</c>, <c>$12</c>, ...) - plus the leading <c>%</c> that
+        /// <c>Dialogue.prepareCurrentDialogueForDisplay</c> strips to mark a line as drawn
+        /// without a portrait.
         /// </para>
         /// <para>
         /// The game does that stripping only for the line that is *currently* being shown - every
@@ -509,8 +512,8 @@ namespace LanguageSwitcher
         /// those other entries directly (<c>DialogueBox.getCurrentString</c> for multi-page lines,
         /// and the re-parsed <c>Dialogue</c> instances we build for translations), so tokens leak
         /// into what we display - which is why each of these was found one at a time from a
-        /// screenshot. If another stray symbol shows up in the log, this is the list to compare
-        /// against that method.
+        /// screenshot. If another stray symbol shows up in the log, those two methods are the
+        /// list to compare against.
         /// </para>
         /// <para>
         /// This only touches our own copy of the text for the replay log; it doesn't modify the live
@@ -526,8 +529,19 @@ namespace LanguageSwitcher
                 text = text.Replace(token, "");
 
             text = PortraitIndexToken.Replace(text, "");
+            text = text.Trim();
 
-            return text.Trim();
+            // 开头一个光秃秃的 % 不是占位符，是"这一行不显示头像"的标记，用在旁白式的动作
+            // 描述上（"%Sam's trying to do a kickflip."）。游戏在 prepareCurrentDialogueForDisplay
+            // 里剥掉它，判断依据就是开头这段不在 percentTokens 白名单里。直接引用游戏那份名单，
+            // 而不是自己抄一遍——以后官方加了新占位符，这里会跟着走。
+            if (text.StartsWith("%", StringComparison.Ordinal)
+                && !Dialogue.percentTokens.Any(token => text.StartsWith(token, StringComparison.Ordinal)))
+            {
+                text = text.Substring(1);
+            }
+
+            return text;
         }
 
         /// <summary>Get the text of the currently-displayed line of <paramref name="dialogue"/>, in a different language than the one currently active, without disturbing the player's actual current language.</summary>
@@ -542,16 +556,20 @@ namespace LanguageSwitcher
         /// text-parsing operation with no NPC/quest/global state involved - and pick the line at
         /// the same index.
         /// <para>
-        /// Some entries contain "$r" (random) branches: which branch gets appended to
-        /// <see cref="Dialogue.dialogues"/> is chosen randomly *at parse time*, independently each
-        /// time the entry is parsed. Our re-parse above rolls its own independent pick, which is
-        /// often a completely different, unrelated branch than the live conversation actually
-        /// showed (confirmed via testing - a re-parsed "translation" turned out to be an unrelated
-        /// line the player never saw). There's no way to reproduce the live roll from outside, so
-        /// as a heuristic, if the reconstructed parse doesn't have the same number of lines as the
-        /// live one, we treat the whole entry as unreliable and don't return a translation for it -
-        /// showing nothing is better than confidently showing the wrong line for a language-learning
-        /// tool. Lines that don't involve $r/$q branching (the common case) aren't affected.
+        /// That re-parse is the fallback, not the first choice, because it re-runs every decision
+        /// the parser makes - including the coin flip in a <c>$c</c> branch. See
+        /// <see cref="TryAlignRawSegments"/>, which is tried first and lines the two raw entries up
+        /// segment by segment without rolling anything.
+        /// </para>
+        /// <para>
+        /// The line-count check below is what's left of an earlier attempt to catch branch
+        /// divergence, and it's worth knowing why it isn't enough on its own: it assumed a different
+        /// branch would produce a different number of lines. Both sides of a <c>$c</c> are usually a
+        /// single line, so the counts match and an unrelated line sails straight through - that's
+        /// how Linus's Sunday dialogue once got "translated" into a sentence the player never saw.
+        /// The count check still earns its place for structural mismatches, but the caller refuses
+        /// to reach this path at all when the entry contains a <c>$c</c>. Showing nothing beats
+        /// confidently showing the wrong line in a tool people use to learn a language.
         /// </para>
         /// </remarks>
         private string? TryGetOtherLanguageDialogueLine(Dialogue dialogue, LocalizedContentManager.LanguageCode otherLanguage)
@@ -565,6 +583,20 @@ namespace LanguageSwitcher
                     ?? this.TryGetGiftReactionLine(dialogue, otherLanguage);
             }
 
+            // 首选：把原文按游戏的方式切成段，认出实况这一行来自哪一段，再取另一语言的同一段。
+            // 这条路完全不重新掷随机，所以能处理下面整条重解析处理不了的 $c 分支。
+            string? aligned = this.TryAlignRawSegments(dialogue, translationKey, otherLanguage, out bool hasRandomBranch);
+            if (aligned != null)
+                return aligned;
+
+            // 分段对不上，而原文里有 $c —— 整条重解析必然重掷一次骰子，很可能落到另一条分支上，
+            // 而两条分支各只有一行，下面的行数校验根本发现不了。宁可不给译文。
+            if (hasRandomBranch)
+            {
+                this.LogDiagnostic($"[DialogueDiag] '{translationKey}' has a $c branch and couldn't be aligned; refusing to re-parse");
+                return null;
+            }
+
             LocalizedContentManager.LanguageCode original = LocalizedContentManager.CurrentLanguageCode;
             try
             {
@@ -576,7 +608,7 @@ namespace LanguageSwitcher
                 if (parsed.dialogues.Count == 0)
                     return null;
                 if (parsed.dialogues.Count != dialogue.dialogues.Count)
-                    return null; // likely diverged at a $r/$q branch - see remarks above
+                    return null; // 结构对不上，见上面的说明
 
                 int index = Math.Min(dialogue.currentDialogueIndex, parsed.dialogues.Count - 1);
 
@@ -592,6 +624,158 @@ namespace LanguageSwitcher
             finally
             {
                 LocalizedContentManager.CurrentLanguageCode = original;
+            }
+        }
+
+        /// <summary>Find the other-language text for a line by lining the two raw dialogue entries up segment by segment, instead of re-parsing the whole entry.</summary>
+        /// <param name="hasRandomBranch">Set to whether the entry contains a <c>$c</c> branch, so the caller knows not to fall back to re-parsing if this returns null.</param>
+        /// <remarks>
+        /// <para>
+        /// Re-parsing a whole entry re-runs everything the parser does, including the coin flip in
+        /// <c>$c</c> (a random branch). Both sides of a <c>$c</c> are usually a single line, so the
+        /// re-parse produces the same <c>dialogues.Count</c> whichever branch it lands on - which is
+        /// how a completely unrelated line once got shown as the translation of Linus's Sunday
+        /// dialogue. Counting lines cannot catch that, because nothing about the count differs.
+        /// </para>
+        /// <para>
+        /// So this doesn't re-parse the entry at all. It splits the raw source the same way
+        /// <c>Dialogue.parseDialogueString</c> does - the weekly <c>||</c> rotation, then <c>#</c> -
+        /// works out which segment produced the line currently on screen, and reads the same segment
+        /// out of the other language. No dice are rolled, so there's nothing to diverge.
+        /// </para>
+        /// <para>
+        /// Returning null means "couldn't establish which segment this line came from", not "no
+        /// translation exists" - the caller decides what to do about that based on
+        /// <paramref name="hasRandomBranch"/>.
+        /// </para>
+        /// </remarks>
+        private string? TryAlignRawSegments(Dialogue dialogue, string translationKey, LocalizedContentManager.LanguageCode otherLanguage, out bool hasRandomBranch)
+        {
+            hasRandomBranch = false;
+
+            // translation key 形如 "Characters\Dialogue\Linus:Sun"，最后一个冒号前是资源名
+            int separator = translationKey.LastIndexOf(':');
+            if (separator <= 0 || separator == translationKey.Length - 1)
+                return null;
+
+            string assetName = translationKey.Substring(0, separator);
+            string entryKey = translationKey.Substring(separator + 1);
+
+            NPC? speaker = dialogue.speaker;
+            string? liveText = CleanDialogueText(dialogue.dialogues[dialogue.currentDialogueIndex].Text);
+            if (string.IsNullOrEmpty(liveText))
+                return null;
+
+            LocalizedContentManager.LanguageCode original = LocalizedContentManager.CurrentLanguageCode;
+            try
+            {
+                var liveData = this.Helper.GameContent.Load<Dictionary<string, string>>(assetName);
+                if (!liveData.TryGetValue(entryKey, out string? liveRaw))
+                    return null;
+
+                string[] liveSegments = SplitRawDialogue(liveRaw);
+                hasRandomBranch = liveSegments.Any(segment => segment.StartsWith("$c", StringComparison.Ordinal));
+
+                // 哪些段重新解析后能还原出正在显示的这一行？
+                List<int> matches = new();
+                for (int i = 0; i < liveSegments.Length; i++)
+                {
+                    if (this.ParseSegmentText(speaker, liveSegments[i]) == liveText)
+                        matches.Add(i);
+                }
+
+                if (matches.Count == 0)
+                {
+                    // 静默失败最难查：把两边的原始条目打出来，下次复现时就能直接看出是哪种结构
+                    // 让分段对不上，而不用再猜一轮。
+                    this.LogDiagnostic(
+                        $"[DialogueDiag] couldn't align '{translationKey}': no segment reproduced the live line."
+                        + $" live={liveSegments.Length} segment(s), hasRandomBranch={hasRandomBranch}"
+                        + $" | live line: {liveText}"
+                        + $" | raw ({original}): {liveRaw}");
+                    return null;
+                }
+
+                LocalizedContentManager.CurrentLanguageCode = otherLanguage;
+
+                var otherData = this.Helper.GameContent.Load<Dictionary<string, string>>(assetName);
+                if (!otherData.TryGetValue(entryKey, out string? otherRaw))
+                    return null;
+
+                string[] otherSegments = SplitRawDialogue(otherRaw);
+                if (otherSegments.Length != liveSegments.Length)
+                {
+                    // 同一个 key 在两种语言下段数不同 —— 官方译文的分页/条件结构和原文就不一样，
+                    // 下标没法直接套。
+                    this.LogDiagnostic(
+                        $"[DialogueDiag] couldn't align '{translationKey}': {liveSegments.Length} segment(s) in {original}"
+                        + $" but {otherSegments.Length} in {otherLanguage}"
+                        + $" | raw ({otherLanguage}): {otherRaw}");
+                    return null;
+                }
+
+                // 同一句原文可能在多段里重复出现；只有它们的译文也一致才敢用（和送礼反应同一个取舍）
+                List<string> candidates = matches
+                    .Select(i => this.ParseSegmentText(speaker, otherSegments[i], applyPlayerStrings: true))
+                    .Where(text => !string.IsNullOrEmpty(text))
+                    .Distinct()
+                    .ToList()!;
+
+                this.LogDiagnostic(
+                    $"[DialogueDiag] aligned '{translationKey}': segment(s) [{string.Join(", ", matches)}] of {liveSegments.Length}, "
+                    + $"{candidates.Count} distinct {otherLanguage} value(s), hasRandomBranch={hasRandomBranch}");
+
+                if (candidates.Count != 1)
+                    return null; // 候选译文互相矛盾，宁可不给
+
+                return candidates[0];
+            }
+            catch (Exception ex)
+            {
+                this.Monitor.Log($"Couldn't align raw segments for '{translationKey}': {ex.Message}", LogLevel.Trace);
+                return null;
+            }
+            finally
+            {
+                LocalizedContentManager.CurrentLanguageCode = original;
+            }
+        }
+
+        /// <summary>Split a raw dialogue entry into segments the same way <c>Dialogue.parseDialogueString</c> does: pick this week's variant out of any <c>||</c> rotation, then split on <c>#</c>.</summary>
+        /// <remarks>The <c>||</c> pick is driven by <c>Game1.stats.DaysPlayed</c>, so it lands on the same variant in every language - unlike <c>$c</c>, it's safe to reproduce.</remarks>
+        private static string[] SplitRawDialogue(string raw)
+        {
+            string text = TokenParser.ParseText(raw) ?? "";
+
+            string[] weeklyVariants = text.Split("||");
+            if (weeklyVariants.Length > 1)
+                text = weeklyVariants[Game1.stats.DaysPlayed / 7 % weeklyVariants.Length];
+
+            return text.Split('#');
+        }
+
+        /// <summary>Parse one raw segment on its own and return the displayed line it produces, cleaned up the same way we clean everything else - or null if the segment isn't a line of dialogue (a <c>$</c> command, say).</summary>
+        /// <param name="applyPlayerStrings">Whether to substitute <c>@</c> and the <c>%spouse</c> family. Off while matching, because the live text we compare against hasn't had them substituted yet either; on for the text we actually display.</param>
+        private string? ParseSegmentText(NPC? speaker, string segment, bool applyPlayerStrings = false)
+        {
+            if (string.IsNullOrWhiteSpace(segment) || segment.StartsWith("$", StringComparison.Ordinal))
+                return null;
+
+            try
+            {
+                var parsed = new Dialogue(speaker, null, segment);
+                if (parsed.dialogues.Count == 0)
+                    return null;
+
+                string text = parsed.dialogues[0].Text;
+                if (applyPlayerStrings)
+                    text = parsed.ReplacePlayerEnteredStrings(text);
+
+                return CleanDialogueText(text);
+            }
+            catch
+            {
+                return null;
             }
         }
 
