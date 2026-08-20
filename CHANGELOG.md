@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.5
+
+- **The replay log no longer shows the wrong translation for dialogue with a random branch.** Some
+  lines are picked by a coin flip when the game parses them, and looking the line up again rolled
+  that flip a second time — occasionally producing a completely unrelated sentence presented as the
+  translation. Those lines are now matched against the source text instead of being re-parsed, and
+  where the match can't be established the entry says "no translation" rather than guessing.
+- **Narration lines no longer start with a stray `%`.** Lines shown without a portrait ("Sam's
+  trying to do a kickflip.") kept the marker the game uses to flag them.
+
 ## 1.0.4
 
 - **The billboard now follows the language switch.** The Help Wanted quest and the special orders

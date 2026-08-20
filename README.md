@@ -2,7 +2,7 @@
 
 *[中文说明](README.zh-CN.md)*
 
-**[Download on Nexus Mods](https://www.nexusmods.com/stardewvalley/mods/50762)** · [Changelog](CHANGELOG.md)
+**[Download on Nexus Mods](https://www.nexusmods.com/stardewvalley/mods/50762)** · [Changelog](CHANGELOG.md) · [Buy me a boba tea 🧋](https://ko-fi.com/vilalotteria)
 
 Stardew Valley locks its language at startup — to see how something is worded in another language
 you'd normally have to quit, change the setting, and reload your save.

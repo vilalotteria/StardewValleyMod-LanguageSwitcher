@@ -2,7 +2,7 @@
 
 *[English](README.md)*
 
-**[在 Nexus Mods 下载](https://www.nexusmods.com/stardewvalley/mods/50762)** · [更新日志](CHANGELOG.md)
+**[在 Nexus Mods 下载](https://www.nexusmods.com/stardewvalley/mods/50762)** · [更新日志](CHANGELOG.md) · [请我喝杯奶茶 🧋](https://ko-fi.com/vilalotteria)
 
 星露谷的语言在启动时就固定了——想看看某句话换个语言怎么说，正常得退出游戏、改设置、重新读档。
 
